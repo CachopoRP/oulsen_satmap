@@ -4,6 +4,49 @@
 
 ---
 
+## 2026-09-07 (2) — Causa real del segundo crash: 65 ficheros `.ydd` idénticos byte a byte · Claude
+
+**Continúa la entrada anterior.** El crash `BREAKPOINT_80000003` (hash `{2bff6f77-...}`, ver
+`qbx_phone/CLAUDE_LOG.md` entradas 48/50) seguía pasando **al cargar el server** incluso después de
+la reconversión de texturas y de un `restart` completo — descartado también que fuera caché del
+cliente (probado y sin efecto).
+
+**Causa real encontrada**, leyendo el log real del cliente
+(`FiveM for GTAV Enhanced/logs/fivem-for-gtav-enhanced.log-*`) justo antes del crash, dos veces
+seguidas, en las dos pruebas de Oscar:
+
+```
+[error] Failed to load cache for cfx_resource_oulsen_satmap:/minimap_4_6.ydd. Error: ... HTTP 404
+[error] Failed to load cache for cfx_resource_oulsen_satmap:/minimap_4_5.ydd. Error: ... HTTP 404
+[critical] The application has crashed!
+```
+
+El cliente pide exactamente esos dos ficheros y el servidor los da por 404 — inmediatamente después,
+crash. Confirmado que el `.tar.gz` del deploy no filtra nada (`tar -czf ... -C resources/oulsen_satmap .`,
+sin exclusiones) y que ambos ficheros SÍ están en el repo y en el volumen — no era un problema de
+despliegue.
+
+**La causa real:** los **65 ficheros `.ydd`** de `stream/` (placeholders diminutos, ~500 bytes,
+heredados tal cual del mod original de 2021 — confirmado con `git log`, existen así desde el primer
+commit del propio Oulsen) son **byte a byte idénticos entre sí** (mismo SHA256 los 65). Esto nunca
+fue un problema en Legacy, pero en el cliente de **FiveM Enhanced** el manejo de streaming/caché de
+ficheros con contenido idéntico dentro del mismo resource parece chocar (dedupe interno por hash de
+contenido con algún límite/bug) — de los 65 archivos idénticos, dos en concreto (`minimap_4_5.ydd`/
+`minimap_4_6.ydd`, reproducible en ambas pruebas) acaban sin poder servirse. Encaja con reportes
+conocidos de bugs de streaming de assets base específicos de Enhanced (ver
+[citizenfx/rfc#92](https://github.com/citizenfx/rfc/discussions/92), un caso distinto pero de la
+misma familia — override de assets base ignorado/roto en Enhanced).
+
+**Fix:** cada uno de los 65 `.ydd` recibió un offset minúsculo y único en
+`Drawable.BoundingSphereRadius` (ya era un valor genérico e idéntico entre los 65, sin uso real
+visible — no representan geometría real, son placeholders) y se resavearon con la lógica real de
+CodeWalker — mismo contenido funcional, pero ahora **65 hashes distintos**. Verificado con
+`CwToolkit check`: los 78 ficheros de `stream/` siguen cargando sin excepción. `stream_enhanced/`
+(la copia de referencia) actualizada igual, para que siga siendo un espejo fiel.
+
+**Sin confirmar en vivo todavía** — pendiente de que Oscar conecte de nuevo y confirme que el crash
+al cargar el server ya no pasa.
+
 ## 2026-09-07 — Reconvertidas las 102 texturas a Enhanced de verdad (crash real en producción) · Claude
 
 **Crash real reportado por Oscar** tras activar el `ensure` de este resource por primera vez en
